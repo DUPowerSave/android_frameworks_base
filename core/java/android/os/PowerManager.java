@@ -1387,8 +1387,9 @@ public final class PowerManager {
 
         /** @hide */
         public void setUnimportantForLogging(boolean state) {
-            if (state) mFlags |= UNIMPORTANT_FOR_LOGGING;
-            else mFlags &= ~UNIMPORTANT_FOR_LOGGING;
+            //if (state) mFlags |= UNIMPORTANT_FOR_LOGGING;
+            //else 
+	    mFlags &= ~UNIMPORTANT_FOR_LOGGING;
         }
 
         @Override

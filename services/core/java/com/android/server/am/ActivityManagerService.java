@@ -50,6 +50,7 @@ import com.android.server.LockGuard;
 import com.android.server.ServiceThread;
 import com.android.server.SystemService;
 import com.android.server.SystemServiceManager;
+import com.android.server.power.PowerManagerService;
 import com.android.server.Watchdog;
 import com.android.server.am.ActivityStack.ActivityState;
 import com.android.server.firewall.IntentFirewall;
@@ -270,6 +271,7 @@ import static android.content.pm.PackageManager.FEATURE_FREEFORM_WINDOW_MANAGEME
 import static android.content.pm.PackageManager.FEATURE_LEANBACK_ONLY;
 import static android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE;
 import static android.content.pm.PackageManager.GET_PROVIDERS;
+import static android.content.pm.PackageManager.MATCH_ALL;
 import static android.content.pm.PackageManager.MATCH_DEBUG_TRIAGED_MISSING;
 import static android.content.pm.PackageManager.MATCH_DIRECT_BOOT_AWARE;
 import static android.content.pm.PackageManager.MATCH_DIRECT_BOOT_UNAWARE;
@@ -419,6 +421,7 @@ public final class ActivityManagerService extends ActivityManagerNative
 
     // The flags that are set for all calls we make to the package manager.
     static final int STOCK_PM_FLAGS = PackageManager.GET_SHARED_LIBRARY_FILES;
+    //static final int STOCK_PM_FLAGS = PackageManager.MATCH_ALL | PackageManager.GET_SHARED_LIBRARY_FILES;
 
     static final String SYSTEM_DEBUGGABLE = "ro.debuggable";
 
@@ -1135,6 +1138,11 @@ public final class ActivityManagerService extends ActivityManagerNative
     DeviceIdleController.LocalService mLocalDeviceIdleController;
 
     /**
+     * Access to PowermanagerService service.
+     */
+    PowerManagerService mPowerManagerService;
+
+    /**
      * Information about and control over application operations
      */
     final AppOpsService mAppOpsService;
@@ -1244,6 +1252,10 @@ public final class ActivityManagerService extends ActivityManagerNative
      * For some direct access we need to power manager.
      */
     PowerManagerInternal mLocalPowerManager;
+    PowerManager mPowerManager;
+
+    boolean mDeviceIdleMode = false;
+
 
     /**
      * We want to hold a wake lock while running a voice interaction session, since
@@ -2774,8 +2786,10 @@ public final class ActivityManagerService extends ActivityManagerNative
         mStackSupervisor.initPowerManagement();
         mBatteryStatsService.initPowerManagement();
         mLocalPowerManager = LocalServices.getService(PowerManagerInternal.class);
-        PowerManager pm = (PowerManager)mContext.getSystemService(Context.POWER_SERVICE);
-        mVoiceWakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "*voice*");
+        mPowerManager = (PowerManager)mContext.getSystemService(Context.POWER_SERVICE);
+        mPowerManagerService = LocalServices.getService(PowerManagerService.class);
+        //PowerManagerService = (PowerManager)mContext.getSystemService(Context.POWER_SERVICE);
+        mVoiceWakeLock = mPowerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "*voice*");
         mVoiceWakeLock.setReferenceCounted(false);
     }
 
@@ -5261,7 +5275,7 @@ public final class ActivityManagerService extends ActivityManagerNative
             EventLog.writeEvent(EventLogTags.AM_PROC_DIED, app.userId, app.pid, app.processName);
             if (DEBUG_CLEANUP) Slog.v(TAG_CLEANUP,
                 "Dying app: " + app + ", pid: " + pid + ", thread: " + thread.asBinder());
-            handleAppDiedLocked(app, false, true);
+            handleAppDiedLocked(app, false, false);
 
             if (doOomAdj) {
                 updateOomAdjLocked();
@@ -6862,6 +6876,19 @@ public final class ActivityManagerService extends ActivityManagerNative
             }
         }, dumpheapFilter);
 
+        IntentFilter idleFilter = new IntentFilter();
+	idleFilter.addAction(PowerManager.ACTION_LIGHT_DEVICE_IDLE_MODE_CHANGED);
+        mContext.registerReceiver(new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+	    	    mDeviceIdleMode = mPowerManager.isLightDeviceIdleMode();
+                    if (DEBUG_SERVICE) Slog.v(TAG_SERVICE, "DeviceIdleMode changed :" + mDeviceIdleMode);
+		    //if( mDeviceIdleMode ) runInIdleDisabled();
+		}
+            
+        }, idleFilter);
+
+
         // Let system services know.
         mSystemServiceManager.startBootPhase(SystemService.PHASE_BOOT_COMPLETED);
 
@@ -7939,19 +7966,26 @@ public final class ActivityManagerService extends ActivityManagerNative
 
     public int getAppStartMode(int uid, String packageName) {
         synchronized (this) {
-            return checkAllowBackgroundLocked(uid, packageName, -1, true);
+            return checkAllowBackgroundLocked(uid, packageName, -1, true, null);
         }
     }
 
     int checkAllowBackgroundLocked(int uid, String packageName, int callingPid,
-            boolean allowWhenForeground) {
+            boolean allowWhenForeground, Intent intent) {
+
         UidRecord uidRec = mActiveUids.get(uid);
+
+
+        if( mPowerManagerService!=null && !mPowerManagerService.checkAllowIntent(uid, packageName, callingPid, allowWhenForeground, intent)  ) {
+            return ActivityManager.APP_START_MODE_DISABLED;
+	}
+
         if (!mLenientBackgroundCheck) {
             if (!allowWhenForeground || uidRec == null
                     || uidRec.curProcState >= ActivityManager.PROCESS_STATE_IMPORTANT_BACKGROUND) {
                 if (mAppOpsService.noteOperation(AppOpsManager.OP_RUN_IN_BACKGROUND, uid,
                         packageName) != AppOpsManager.MODE_ALLOWED) {
-                    return ActivityManager.APP_START_MODE_DELAYED;
+            		return ActivityManager.APP_START_MODE_DELAYED;
                 }
             }
 
@@ -7969,7 +8003,7 @@ public final class ActivityManagerService extends ActivityManagerNative
             }
             if (mAppOpsService.noteOperation(AppOpsManager.OP_RUN_IN_BACKGROUND, uid, packageName)
                     != AppOpsManager.MODE_ALLOWED) {
-                return ActivityManager.APP_START_MODE_DELAYED;
+                    return ActivityManager.APP_START_MODE_DELAYED;
             }
         }
         return ActivityManager.APP_START_MODE_NORMAL;
@@ -21471,6 +21505,12 @@ public final class ActivityManagerService extends ActivityManagerNative
         }
     }
 
+
+    final void runInIdleDisabled() {
+        synchronized (this) {
+		mServices.stopInIdleLocked();
+	}
+    }
     final void runInBackgroundDisabled(int uid) {
         synchronized (this) {
             UidRecord uidRec = mActiveUids.get(uid);

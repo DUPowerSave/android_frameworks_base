@@ -306,7 +306,7 @@ public final class ActiveServices {
     ComponentName startServiceLocked(IApplicationThread caller, Intent service, String resolvedType,
             int callingPid, int callingUid, String callingPackage, final int userId)
             throws TransactionTooLargeException {
-        if (DEBUG_DELAYED_STARTS) Slog.v(TAG_SERVICE, "startService: " + service
+        if (DEBUG_DELAYED_STARTS) Slog.v(TAG_SERVICE, "startServiceLocked: " + service
                 + " type=" + resolvedType + " args=" + service.getExtras());
 
         final boolean callerFg;
@@ -342,13 +342,14 @@ public final class ActiveServices {
             return null;
         }
 
-        if (!r.startRequested) {
+        //if (!r.startRequested) {
             final long token = Binder.clearCallingIdentity();
             try {
                 // Before going further -- if this app is not allowed to run in the
                 // background, then at this point we aren't going to let it period.
+	        if (DEBUG_DELAYED_STARTS) Slog.v(TAG_SERVICE, "startServiceLocked:  check allowed");
                 final int allowed = mAm.checkAllowBackgroundLocked(
-                        r.appInfo.uid, r.packageName, callingPid, true);
+                        r.appInfo.uid, r.packageName, callingPid, true, service);
                 if (allowed != ActivityManager.APP_START_MODE_NORMAL) {
                     Slog.w(TAG, "Background start not allowed: service "
                             + service + " to " + r.name.flattenToShortString()
@@ -359,7 +360,7 @@ public final class ActiveServices {
             } finally {
                 Binder.restoreCallingIdentity(token);
             }
-        }
+        //}
 
         NeededUriGrants neededGrants = mAm.checkGrantUriPermissionFromIntentLocked(
                 callingUid, r.packageName, service, service.getFlags(), null, r.userId);
@@ -584,6 +585,43 @@ public final class ActiveServices {
 
         return 0;
     }
+
+    void stopInIdleLocked() {
+        // Stop all services associated with this uid due to it going to the background
+        // stopped state.
+
+        ArrayList<ServiceRecord> stopping = null;
+
+        for (int j = mServiceMap.size() - 1; j >= 0; j--) {
+            ServiceMap services = mServiceMap.valueAt(j); 
+            if (services != null) {
+                for (int i=services.mServicesByName.size()-1; i>=0; i--) {
+                    ServiceRecord service = services.mServicesByName.valueAt(i);
+                    if (service.startRequested) {
+			if(mAm.checkAllowBackgroundLocked(service.appInfo.uid, service.packageName, -1, 
+                                   true, service.intent.getIntent()) != ActivityManager.APP_START_MODE_NORMAL  ) {
+
+                            if (stopping == null) {
+                                stopping = new ArrayList<>();
+                            }
+               		    services.ensureNotStartingBackground(service);
+                            stopping.add(service);
+                        }
+                    }
+                }
+           }
+       }
+       if (stopping != null) {
+           for (int i=stopping.size()-1; i>=0; i--) {
+               ServiceRecord service = stopping.get(i);
+               service.delayed = false;
+               if (DEBUG_SERVICE) Slog.v(TAG_SERVICE, "stopService: (forced by idle) " + service);
+               stopServiceLocked(service);
+           }
+       }
+       
+    }
+
 
     void stopInBackgroundLocked(int uid) {
         // Stop all services associated with this uid due to it going to the background

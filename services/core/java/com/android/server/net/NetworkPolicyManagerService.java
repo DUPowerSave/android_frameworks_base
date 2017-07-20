@@ -3129,7 +3129,7 @@ public class NetworkPolicyManagerService extends INetworkPolicyManager.Stub {
 
         final boolean isIdle = !paroled && isUidIdle(uid);
         final boolean restrictMode = isIdle || mRestrictPower || mDeviceIdleMode;
-        final boolean isForeground = isUidForegroundOnRestrictPowerUL(uid);
+        final boolean isForeground = paroled; //isUidForegroundOnRestrictPowerUL(uid);
 
         final boolean isWhitelisted = isWhitelistedBatterySaverUL(uid);
         final int oldRule = oldUidRules & MASK_ALL_NETWORKS;

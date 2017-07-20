@@ -50,13 +50,13 @@ class ActivityManagerDebugConfig {
     static final boolean DEBUG_APP = DEBUG_ALL_ACTIVITIES || false;
     static final boolean DEBUG_BACKUP = DEBUG_ALL || false;
     static final boolean DEBUG_BROADCAST = DEBUG_ALL || false;
-    static final boolean DEBUG_BROADCAST_BACKGROUND = DEBUG_BROADCAST || false;
+    static final boolean DEBUG_BROADCAST_BACKGROUND = DEBUG_BROADCAST || true;
     static final boolean DEBUG_BROADCAST_LIGHT = DEBUG_BROADCAST || false;
     static final boolean DEBUG_CLEANUP = DEBUG_ALL || false;
     static final boolean DEBUG_CONFIGURATION = DEBUG_ALL || false;
     static final boolean DEBUG_CONTAINERS = DEBUG_ALL_ACTIVITIES || false;
     static final boolean DEBUG_FOCUS = false;
-    static final boolean DEBUG_IDLE = DEBUG_ALL_ACTIVITIES || false;
+    static final boolean DEBUG_IDLE = DEBUG_ALL_ACTIVITIES ||true;
     static final boolean DEBUG_IMMERSIVE = DEBUG_ALL || false;
     static final boolean DEBUG_LOCKSCREEN = DEBUG_ALL || false;
     static final boolean DEBUG_LOCKTASK = DEBUG_ALL || false;
@@ -64,7 +64,7 @@ class ActivityManagerDebugConfig {
     static final boolean DEBUG_MU = DEBUG_ALL || false;
     static final boolean DEBUG_OOM_ADJ = DEBUG_ALL || false;
     static final boolean DEBUG_PAUSE = DEBUG_ALL || false;
-    static final boolean DEBUG_POWER = DEBUG_ALL || false;
+    static final boolean DEBUG_POWER = DEBUG_ALL || true;
     static final boolean DEBUG_POWER_QUICK = DEBUG_POWER || false;
     static final boolean DEBUG_PROCESS_OBSERVERS = DEBUG_ALL || false;
     static final boolean DEBUG_PROCESSES = DEBUG_ALL || false;
@@ -75,7 +75,7 @@ class ActivityManagerDebugConfig {
     static final boolean DEBUG_RESULTS = DEBUG_ALL || false;
     static final boolean DEBUG_SAVED_STATE = DEBUG_ALL_ACTIVITIES || false;
     static final boolean DEBUG_SCREENSHOTS = DEBUG_ALL_ACTIVITIES || false;
-    static final boolean DEBUG_SERVICE = DEBUG_ALL || false;
+    static final boolean DEBUG_SERVICE = DEBUG_ALL || true;
     static final boolean DEBUG_SERVICE_EXECUTING = DEBUG_ALL || false;
     static final boolean DEBUG_STACK = DEBUG_ALL || false;
     static final boolean DEBUG_STATES = DEBUG_ALL_ACTIVITIES || false;
@@ -90,7 +90,7 @@ class ActivityManagerDebugConfig {
     static final boolean DEBUG_VISIBLE_BEHIND = DEBUG_ALL_ACTIVITIES || false;
     static final boolean DEBUG_USAGE_STATS = DEBUG_ALL || false;
     static final boolean DEBUG_PERMISSIONS_REVIEW = DEBUG_ALL || false;
-    static final boolean DEBUG_WHITELISTS = DEBUG_ALL || false;
+    static final boolean DEBUG_WHITELISTS = DEBUG_ALL || true;
 
     static final String POSTFIX_ADD_REMOVE = (APPEND_CATEGORY_NAME) ? "_AddRemove" : "";
     static final String POSTFIX_APP = (APPEND_CATEGORY_NAME) ? "_App" : "";
