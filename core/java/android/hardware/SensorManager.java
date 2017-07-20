@@ -1666,6 +1666,10 @@ public abstract class SensorManager {
      * @throws IllegalArgumentException when sensor is null or not a trigger sensor.
      */
     public boolean requestTriggerSensor(TriggerEventListener listener, Sensor sensor) {
+        if( sensor.getType() == Sensor.TYPE_SIGNIFICANT_MOTION ) {
+                Log.i(TAG, "Ignore Significant Motion Sensor trigger!");
+            return true;
+        }
         return requestTriggerSensorImpl(listener, sensor);
     }
 
