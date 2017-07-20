@@ -239,8 +239,10 @@ public class AppOpsManager {
     public static final int OP_GET_ACCOUNTS = 62;
     /** @hide Control whether an application is allowed to run in the background. */
     public static final int OP_RUN_IN_BACKGROUND = 63;
+    /** @hide Control whether an application is allowed to wake device from idle. */
+    public static final int OP_WAKE_FROM_IDLE = 64;
     /** @hide */
-    public static final int _NUM_OP = 64;
+    public static final int _NUM_OP = 65;
 
     /** Access to coarse location information. */
     public static final String OPSTR_COARSE_LOCATION = "android:coarse_location";
@@ -386,8 +388,8 @@ public class AppOpsManager {
      */
     private static int[] sOpToSwitch = new int[] {
             OP_COARSE_LOCATION,
-            OP_COARSE_LOCATION,
-            OP_COARSE_LOCATION,
+            OP_FINE_LOCATION,
+            OP_GPS,
             OP_VIBRATE,
             OP_READ_CONTACTS,
             OP_WRITE_CONTACTS,
@@ -426,8 +428,8 @@ public class AppOpsManager {
             OP_AUDIO_NOTIFICATION_VOLUME,
             OP_AUDIO_BLUETOOTH_VOLUME,
             OP_WAKE_LOCK,
-            OP_COARSE_LOCATION,
-            OP_COARSE_LOCATION,
+            OP_MONITOR_LOCATION,
+            OP_MONITOR_HIGH_POWER_LOCATION,
             OP_GET_USAGE_STATS,
             OP_MUTE_MICROPHONE,
             OP_TOAST_WINDOW,
@@ -449,6 +451,7 @@ public class AppOpsManager {
             OP_TURN_SCREEN_ON,
             OP_GET_ACCOUNTS,
             OP_RUN_IN_BACKGROUND,
+	    OP_WAKE_FROM_IDLE
     };
 
     /**
@@ -520,6 +523,7 @@ public class AppOpsManager {
             null,
             OPSTR_GET_ACCOUNTS,
             null,
+	    null,
     };
 
     /**
@@ -591,6 +595,7 @@ public class AppOpsManager {
             "TURN_ON_SCREEN",
             "GET_ACCOUNTS",
             "RUN_IN_BACKGROUND",
+	    "WAKE_FROM_IDLE"
     };
 
     /**
@@ -662,6 +667,7 @@ public class AppOpsManager {
             null, // no permission for turning the screen on
             Manifest.permission.GET_ACCOUNTS,
             null, // no permission for running in background
+	    null, // no permission to eake from idle
     };
 
     /**
@@ -734,6 +740,7 @@ public class AppOpsManager {
             null, // TURN_ON_SCREEN
             null, // GET_ACCOUNTS
             null, // RUN_IN_BACKGROUND
+	    null  // WAKE_FROM_IDLE
     };
 
     /**
@@ -741,8 +748,8 @@ public class AppOpsManager {
      * (and system ui) to bypass the user restriction when active.
      */
     private static boolean[] sOpAllowSystemRestrictionBypass = new boolean[] {
-            true, //COARSE_LOCATION
-            true, //FINE_LOCATION
+            false, //COARSE_LOCATION
+            false, //FINE_LOCATION
             false, //GPS
             false, //VIBRATE
             false, //READ_CONTACTS
@@ -805,6 +812,7 @@ public class AppOpsManager {
             false, // TURN_ON_SCREEN
             false, // GET_ACCOUNTS
             false, // RUN_IN_BACKGROUND
+	    false  // WAKE_FROM_IDLE
     };
 
     /**
@@ -875,6 +883,7 @@ public class AppOpsManager {
             AppOpsManager.MODE_ALLOWED,  // OP_TURN_ON_SCREEN
             AppOpsManager.MODE_ALLOWED,
             AppOpsManager.MODE_ALLOWED,  // OP_RUN_IN_BACKGROUND
+            AppOpsManager.MODE_ALLOWED,  // OP_WAKE_FROM_IDLE
     };
 
     /**
@@ -949,6 +958,7 @@ public class AppOpsManager {
             false,
             false,
             false,
+	    false // OP_WAKE_FROM_IDLE
     };
 
     /**
