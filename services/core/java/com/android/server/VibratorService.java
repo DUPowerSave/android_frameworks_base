@@ -273,8 +273,8 @@ public class VibratorService extends IVibratorService.Stub
         if (Binder.getCallingPid() == Process.myPid()) {
             return;
         }
-        mContext.enforcePermission(android.Manifest.permission.UPDATE_APP_OPS_STATS,
-                Binder.getCallingPid(), Binder.getCallingUid(), null);
+        //mContext.enforcePermission(android.Manifest.permission.UPDATE_APP_OPS_STATS,
+        //        Binder.getCallingPid(), Binder.getCallingUid(), null);
     }
 
     @Override // Binder call

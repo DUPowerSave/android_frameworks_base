@@ -28,18 +28,18 @@ class ActivityManagerDebugConfig {
     // to figure-out the origin of a log message while debugging the activity manager a little
     // painful. By setting this constant to true, log messages from the activity manager package
     // will be tagged with their class names instead fot the generic tag.
-    static final boolean TAG_WITH_CLASS_NAME = false;
+    static final boolean TAG_WITH_CLASS_NAME = true;
 
     // While debugging it is sometimes useful to have the category name of the log appended to the
     // base log tag to make sifting through logs with the same base tag easier. By setting this
     // constant to true, the category name of the log point will be appended to the log tag.
-    static final boolean APPEND_CATEGORY_NAME = false;
+    static final boolean APPEND_CATEGORY_NAME = true;
 
     // Default log tag for the activity manager package.
     static final String TAG_AM = "ActivityManager";
 
     // Enable all debug log categories.
-    static final boolean DEBUG_ALL = false;
+    static final boolean DEBUG_ALL = true;
 
     // Enable all debug log categories for activities.
     static final boolean DEBUG_ALL_ACTIVITIES = DEBUG_ALL || false;

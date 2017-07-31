@@ -58,6 +58,8 @@ import android.util.SparseArray;
 import android.util.SparseBooleanArray;
 import android.util.SparseLongArray;
 import android.util.TimeUtils;
+import com.android.server.power.PowerManagerService;
+
 
 import java.io.ByteArrayOutputStream;
 import java.io.FileDescriptor;
@@ -151,6 +153,11 @@ class AlarmManagerService extends SystemService {
     long mLastTimeChangeRealtime;
     long mAllowWhileIdleMinTime;
     int mNumTimeChanged;
+
+    /**
+     * Access to PowermanagerService service.
+     */
+    PowerManagerService mPowerManagerService;
 
     /**
      * The current set of user whitelisted apps for device idle mode, meaning these are allowed
@@ -955,6 +962,8 @@ class AlarmManagerService extends SystemService {
             mAppOps = (AppOpsManager) getContext().getSystemService(Context.APP_OPS_SERVICE);
             mLocalDeviceIdleController
                     = LocalServices.getService(DeviceIdleController.LocalService.class);
+
+            mPowerManagerService = LocalServices.getService(PowerManagerService.class);
         }
     }
 
@@ -1070,70 +1079,38 @@ class AlarmManagerService extends SystemService {
             maxElapsed = triggerElapsed + windowLength;
         }
 
-
-        String tag = "<unknown>";
-	if( operation != null ) {
+            String tag = "<unknown>";
+	    if( operation != null ) {
 		tag = operation.getTag("");
-	}
-
-        boolean BlockAlarm = false;
-
-        if (type == AlarmManager.RTC_WAKEUP || type == AlarmManager.ELAPSED_REALTIME_WAKEUP) {
-	    Slog.e(TAG, "WAKE Alarm: " + type + " - " + listenerTag + " - " + callingPackage + " - " + tag + " - " + callingUid);
-  	    if( operation == null && listenerTag.equals("*job.delay*") ){
-   	    	Slog.e(TAG, "WAKE Alarm:  *job.delay*: " + type + " - " + listenerTag + " - " + callingPackage + " - " + tag);
-		BlockAlarm = true; 
-  	    } else if( operation == null && listenerTag.equals("*job.deadline*") ){
-   	    	Slog.e(TAG, "WAKE Alarm:  *job.deadline*: " + type + " - " + listenerTag + " - " + callingPackage + " - " + tag);
-		BlockAlarm = true; 
-	    } else if( operation == null && listenerTag.startsWith("WifiConnectivityManager")) {
-   	    	Slog.e(TAG, "WAKE Alarm:  WifiConnectivityManager: " + type + " - " + listenerTag + " - " + callingPackage + " - " + tag);
-		BlockAlarm = true;
-	    } else if( operation == null && listenerTag.startsWith("SupplicantWifiScannerImpl")) {
-   	    	Slog.e(TAG, "WAKE Alarm:  SupplicantWifiScanner: " + type + " - " + listenerTag + " - " + callingPackage + " - " + tag);
-		BlockAlarm = true;
-	    } else if( operation == null && listenerTag.startsWith("NETWORK_LINGER_COMPLETE")) {
-   	    	Slog.e(TAG, "WAKE Alarm:  NETWORK_LINGER_COMPLETE: " + type + " - " + listenerTag + " - " + callingPackage + " - " + tag);
-		BlockAlarm = true;
-	    } else if( operation != null && tag.equals("android.appwidget.action.APPWIDGET_UPDATE") ) {
-   	    	Slog.e(TAG, "WAKE Alarm:  APPWIDGET_UPDATE: " + type + " - " + listenerTag + " - " + callingPackage + " - " + tag);
-		BlockAlarm = true;
-	    } else if ( tag.contains("com.google.android.gms.gcm") 
-		 | tag.startsWith("com.google.android.intent.action.GCM_RECONNECT")
-		 | tag.contains("firebase") ) {
-		BlockAlarm = false;
-	    } else if ( tag.contains("com.google.android.gms") || tag.contains("com.google.android.location") ) {
-		BlockAlarm = true;
-	    } else {
-		BlockAlarm = false;		
 	    }
 
-
-	    if ( !( tag.contains("com.google.android.gms.gcm") 
-		 | tag.startsWith("com.google.android.intent.action.GCM_RECONNECT")
-		 | tag.contains("firebase") )
-		 && mAppOps.noteOpNoThrow(AppOpsManager.OP_WAKE_FROM_IDLE, callingUid, callingPackage)
-                	!= AppOpsManager.MODE_ALLOWED) {
-	    	Slog.e(TAG, "WAKE Alarm: Blocked by AppOps: " + type + " - " + listenerTag + " - " + callingPackage + " - " + tag + " - " + callingUid);
-		BlockAlarm = true;
-	    }
+            boolean BlockAlarm = false;
 
 
-	    if( BlockAlarm ) {
-                flags &= ~( AlarmManager.FLAG_WAKE_FROM_IDLE | AlarmManager.FLAG_ALLOW_WHILE_IDLE | AlarmManager.FLAG_ALLOW_WHILE_IDLE_UNRESTRICTED) ;
-	        if (type == AlarmManager.RTC_WAKEUP) {
-	            type = AlarmManager.RTC;
+	    if( alarmClock == null && mPowerManagerService != null ) {
+
+	        BlockAlarm = mPowerManagerService.checkAllowAlarm(operation,type,callingUid,callingPackage,tag,listenerTag);
+
+	        if( BlockAlarm ) {
+	    	    Slog.e(TAG, "Blocked Alarm: " + type + " - " + listenerTag + " - " + callingPackage + " - " + tag + " - " + callingUid);
+                    flags &= ~( AlarmManager.FLAG_WAKE_FROM_IDLE | AlarmManager.FLAG_ALLOW_WHILE_IDLE | AlarmManager.FLAG_ALLOW_WHILE_IDLE_UNRESTRICTED) ;
+	            if (type == AlarmManager.RTC_WAKEUP) {
+	                type = AlarmManager.RTC;
+	            } else {
+	                type = AlarmManager.ELAPSED_REALTIME;
+	            }
 	        } else {
-	            type = AlarmManager.ELAPSED_REALTIME;
+		  flags |= (AlarmManager.FLAG_ALLOW_WHILE_IDLE_UNRESTRICTED);
+		  if ((type == AlarmManager.RTC_WAKEUP || type == AlarmManager.ELAPSED_REALTIME_WAKEUP)) {
+                     flags |= (AlarmManager.FLAG_WAKE_FROM_IDLE);
+		  }
 	        }
-	    
-	        Slog.e(TAG, "Blocked WAKE Alarm: " + type + " - " + listenerTag + " - " + callingPackage + " - " + tag);
 	    } else {
-	        Slog.e(TAG, "Not blocked WAKE Alarm: " + type + " - " + listenerTag + " - " + callingPackage + " - " + tag);
+		  flags |= (AlarmManager.FLAG_ALLOW_WHILE_IDLE_UNRESTRICTED);
+		  if ((type == AlarmManager.RTC_WAKEUP || type == AlarmManager.ELAPSED_REALTIME_WAKEUP)) {
+                     flags |= (AlarmManager.FLAG_WAKE_FROM_IDLE);
+		  }
 	    }
-	}
-
-
 
 
         synchronized (mLock) {
@@ -1163,6 +1140,7 @@ class AlarmManagerService extends SystemService {
                         + " -- package not allowed to start");
                 return;
             }
+
         } catch (RemoteException e) {
         }
         removeLocked(operation, directReceiver);
@@ -1176,7 +1154,8 @@ class AlarmManagerService extends SystemService {
             // to pull that earlier if there are existing alarms that have requested to
             // bring us out of idle at an earlier time.
             if (mNextWakeFromIdle != null && a.whenElapsed > mNextWakeFromIdle.whenElapsed) {
-                //a.when = a.whenElapsed = a.maxWhenElapsed = mNextWakeFromIdle.whenElapsed;
+                a.when = a.whenElapsed = a.maxWhenElapsed = mNextWakeFromIdle.whenElapsed;
+                Slog.d(TAG, "idle_mgr: Next wake from idle moved to: " + a.when);
             }
             // Add fuzz to make the alarm go off some time before the actual desired time.
             final long nowElapsed = SystemClock.elapsedRealtime();
@@ -1198,12 +1177,48 @@ class AlarmManagerService extends SystemService {
             }
 
         } else if (mPendingIdleUntil != null) {
+
+
+            String tag = "<unknown>";
+	    if( a.operation != null ) {
+		tag = a.operation.getTag("");
+	    }
+
+            boolean BlockAlarm = false;
+
+
+	    Slog.e(TAG, "Alarm IDLE: type=" + a.type + ", listenerTag=" + a.listenerTag + ", creatorUid=" + a.creatorUid +  ", uid=" + a.uid + ", pkg=" + a.packageName + ", tag=" + tag + " alarmClock=" + a.alarmClock);
+
+//        if ((type == AlarmManager.RTC_WAKEUP || type == AlarmManager.ELAPSED_REALTIME_WAKEUP) && alarmClock == null) {
+        
+	    if( a.alarmClock == null && mPowerManagerService != null ) {
+
+	        if( !mPowerManagerService.isScreenOn() ) {
+	            BlockAlarm = mPowerManagerService.checkAllowAlarm(a.operation,a.type,a.uid,a.packageName,tag,a.listenerTag);
+		    if( BlockAlarm ) {
+	    	        Slog.e(TAG, "Alarm IDLE blocked: type=" + a.type + ", listenerTag=" + a.listenerTag + ", creatorUid=" + a.creatorUid +  ", uid=" + a.uid + ", pkg=" + a.packageName + ", tag=" + tag + " alarmClock=" + a.alarmClock);
+		        return;
+		    }
+	        } else {
+		//flags |= (AlarmManager.FLAG_ALLOW_WHILE_IDLE_UNRESTRICTED);
+		    //if ((a.type == AlarmManager.RTC_WAKEUP || a.type == AlarmManager.ELAPSED_REALTIME_WAKEUP)) {
+                    //   a.flags |= (AlarmManager.FLAG_WAKE_FROM_IDLE);
+		    //}
+	        }
+	    } else {
+//            flags |= (AlarmManager.FLAG_WAKE_FROM_IDLE | AlarmManager.FLAG_ALLOW_WHILE_IDLE_UNRESTRICTED);
+	    }
+
+
+	    Slog.e(TAG, "Alarm IDLE allowed: type=" + a.type + ", listenerTag=" + a.listenerTag + ", creatorUid=" + a.creatorUid +  ", uid=" + a.uid + ", pkg=" + a.packageName + ", tag=" + tag + " alarmClock=" + a.alarmClock);
+
             // We currently have an idle until alarm scheduled; if the new alarm has
             // not explicitly stated it wants to run while idle, then put it on hold.
-            if ((a.flags&(AlarmManager.FLAG_ALLOW_WHILE_IDLE
+            if (a.alarmClock == null && (a.flags&(AlarmManager.FLAG_ALLOW_WHILE_IDLE
                     | AlarmManager.FLAG_ALLOW_WHILE_IDLE_UNRESTRICTED
                     | AlarmManager.FLAG_WAKE_FROM_IDLE))
                     == 0) {
+                Slog.d(TAG, "DeviceIdle: pending=" + a.operation + ", lTag=" + a.listenerTag);
                 mPendingWhileIdleAlarms.add(a);
                 return;
             }
@@ -1256,6 +1271,7 @@ class AlarmManagerService extends SystemService {
             mPendingIdleUntil = a;
             mConstants.updateAllowWhileIdleMinTimeLocked();
             needRebatch = true;
+
         } else if ((a.flags&AlarmManager.FLAG_WAKE_FROM_IDLE) != 0) {
             if (mNextWakeFromIdle == null || mNextWakeFromIdle.whenElapsed > a.whenElapsed) {
                 mNextWakeFromIdle = a;
@@ -1335,7 +1351,7 @@ class AlarmManagerService extends SystemService {
             // If this alarm is for an alarm clock, then it must be standalone and we will
             // use it to wake early from idle if needed.
             if (alarmClock != null) {
-                flags |= AlarmManager.FLAG_WAKE_FROM_IDLE | AlarmManager.FLAG_STANDALONE;
+                flags |= AlarmManager.FLAG_WAKE_FROM_IDLE | AlarmManager.FLAG_STANDALONE | AlarmManager.FLAG_ALLOW_WHILE_IDLE_UNRESTRICTED;
 
             // If the caller is a core system component or on the user's whitelist, and not calling
             // to do work on behalf of someone else, then always set ALLOW_WHILE_IDLE_UNRESTRICTED.
@@ -1430,6 +1446,12 @@ class AlarmManagerService extends SystemService {
                 qcNsrmExt.processBlockedUids(uid, isBlocked, mWakeLock);
             }
         }
+
+	public void rescheduleAllOnModeChange()	{
+		rebatchAllAlarms();
+	}
+	
+	
     };
 
     public final class LocalService {

@@ -3611,11 +3611,12 @@ public final class ActivityManagerService extends ActivityManagerNative
 
         // app launch boost for big.little configurations
         // use cpusets to migrate freshly launched tasks to big cores
-        nativeMigrateToBoost();
-        mIsBoosted = true;
-        mBoostStartTime = SystemClock.uptimeMillis();
-        Message msg = mHandler.obtainMessage(APP_BOOST_DEACTIVATE_MSG);
-        mHandler.sendMessageDelayed(msg, APP_BOOST_MESSAGE_DELAY);
+	// SDV:!!!
+        //nativeMigrateToBoost();
+        //mIsBoosted = true;
+        //mBoostStartTime = SystemClock.uptimeMillis();
+        //Message msg = mHandler.obtainMessage(APP_BOOST_DEACTIVATE_MSG);
+        //mHandler.sendMessageDelayed(msg, APP_BOOST_MESSAGE_DELAY);
 
         // We don't have to do anything more if:
         // (1) There is an existing application record; and
@@ -6877,13 +6878,13 @@ public final class ActivityManagerService extends ActivityManagerNative
         }, dumpheapFilter);
 
         IntentFilter idleFilter = new IntentFilter();
-	idleFilter.addAction(PowerManager.ACTION_LIGHT_DEVICE_IDLE_MODE_CHANGED);
+	idleFilter.addAction(PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED);
         mContext.registerReceiver(new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
-	    	    mDeviceIdleMode = mPowerManager.isLightDeviceIdleMode();
+	    	    mDeviceIdleMode = mPowerManager.isDeviceIdleMode();
                     if (DEBUG_SERVICE) Slog.v(TAG_SERVICE, "DeviceIdleMode changed :" + mDeviceIdleMode);
-		    //if( mDeviceIdleMode ) runInIdleDisabled();
+		    if( mDeviceIdleMode ) runInIdleDisabled();
 		}
             
         }, idleFilter);
@@ -7975,6 +7976,8 @@ public final class ActivityManagerService extends ActivityManagerNative
 
         UidRecord uidRec = mActiveUids.get(uid);
 
+
+        Slog.w(TAG, "checkAllowIntent: checkAllowBackgroundLocked uid=" + uid + ", pkg=" + packageName + ", pid=" + callingPid + ", intent=" + intent);
 
         if( mPowerManagerService!=null && !mPowerManagerService.checkAllowIntent(uid, packageName, callingPid, allowWhenForeground, intent)  ) {
             return ActivityManager.APP_START_MODE_DISABLED;

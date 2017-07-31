@@ -347,16 +347,21 @@ public final class ActiveServices {
             try {
                 // Before going further -- if this app is not allowed to run in the
                 // background, then at this point we aren't going to let it period.
-	        if (DEBUG_DELAYED_STARTS) Slog.v(TAG_SERVICE, "startServiceLocked:  check allowed");
+	        if (DEBUG_DELAYED_STARTS) Slog.v(TAG_SERVICE, "startServiceLocked: check allowed");
                 final int allowed = mAm.checkAllowBackgroundLocked(
                         r.appInfo.uid, r.packageName, callingPid, true, service);
                 if (allowed != ActivityManager.APP_START_MODE_NORMAL) {
-                    Slog.w(TAG, "Background start not allowed: service "
+                    Slog.w(TAG, "startServiceLocked: Background start not allowed: service "
                             + service + " to " + r.name.flattenToShortString()
                             + " from pid=" + callingPid + " uid=" + callingUid
                             + " pkg=" + callingPackage);
                     return null;
-                }
+                } else  {
+                    Slog.w(TAG, "startServiceLocked: Background start allowed: service "
+                            + service + " to " + r.name.flattenToShortString()
+                            + " from pid=" + callingPid + " uid=" + callingUid
+                            + " pkg=" + callingPackage);
+		}
             } finally {
                 Binder.restoreCallingIdentity(token);
             }
@@ -598,8 +603,10 @@ public final class ActiveServices {
                 for (int i=services.mServicesByName.size()-1; i>=0; i--) {
                     ServiceRecord service = services.mServicesByName.valueAt(i);
                     if (service.startRequested) {
+               		if (DEBUG_SERVICE) Slog.v(TAG_SERVICE, "stopService: (forced by idle) check " + service + " intent=" + service.intent.getIntent());
 			if(mAm.checkAllowBackgroundLocked(service.appInfo.uid, service.packageName, -1, 
                                    true, service.intent.getIntent()) != ActivityManager.APP_START_MODE_NORMAL  ) {
+               		    if (DEBUG_SERVICE) Slog.v(TAG_SERVICE, "stopService: (forced by idle) block " + service + " intent=" + service.intent.getIntent());
 
                             if (stopping == null) {
                                 stopping = new ArrayList<>();
@@ -615,7 +622,7 @@ public final class ActiveServices {
            for (int i=stopping.size()-1; i>=0; i--) {
                ServiceRecord service = stopping.get(i);
                service.delayed = false;
-               if (DEBUG_SERVICE) Slog.v(TAG_SERVICE, "stopService: (forced by idle) " + service);
+      	       if (DEBUG_SERVICE) Slog.v(TAG_SERVICE, "stopService: (forced by idle) stop " + service + " intent=" + service.intent.getIntent());
                stopServiceLocked(service);
            }
        }

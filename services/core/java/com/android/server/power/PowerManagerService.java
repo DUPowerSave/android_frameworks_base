@@ -20,13 +20,16 @@ import android.Manifest;
 import android.annotation.IntDef;
 import android.app.ActivityManager;
 import android.app.AppOpsManager;
+import android.app.AlarmManager;
 import android.content.BroadcastReceiver;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.ComponentName;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.content.pm.PackageManager.NameNotFoundException;
 import android.content.res.Resources;
 import android.database.ContentObserver;
 import android.hardware.Sensor;
@@ -36,6 +39,7 @@ import android.hardware.SensorManager;
 import android.hardware.SystemSensorManager;
 import android.hardware.display.DisplayManagerInternal;
 import android.hardware.display.DisplayManagerInternal.DisplayPowerRequest;
+import android.hardware.display.DisplayManager;
 import android.net.Uri;
 import android.os.BatteryManager;
 import android.os.BatteryManagerInternal;
@@ -105,7 +109,7 @@ public final class PowerManagerService extends SystemService
         implements Watchdog.Monitor {
     private static final String TAG = "PowerManagerService";
 
-    private static final boolean DEBUG = false;
+    private static final boolean DEBUG = true;
     private static final boolean DEBUG_SPEW = DEBUG && true;
 
     // Message: Sent when a user activity timeout occurs to update the power state.
@@ -201,6 +205,9 @@ public final class PowerManagerService extends SystemService
     private final Context mContext;
     private final ServiceThread mHandlerThread;
     private final PowerManagerHandler mHandler;
+    private DisplayManager mDisplayManager;
+    private AlarmManager mAlarmManager;
+
 
     private LightsManager mLightsManager;
     private BatteryManagerInternal mBatteryManagerInternal;
@@ -217,6 +224,7 @@ public final class PowerManagerService extends SystemService
     private Light mKeyboardLight;
     private Light mCapsLight;
     private Light mFnLight;
+    private Intent mIdleIntent;
 
     private int mButtonTimeout;
     private int mButtonBrightness;
@@ -623,6 +631,8 @@ public final class PowerManagerService extends SystemService
                     }
                 }
                 mBootCompletedRunnables = null;
+
+
             }
         }
     }
@@ -752,9 +762,22 @@ public final class PowerManagerService extends SystemService
                     Settings.Secure.HARDWARE_KEYS_DISABLE),
                     false, mSettingsObserver, UserHandle.USER_ALL);
 
+
+                mAlarmManager = (AlarmManager) getContext().getSystemService(Context.ALARM_SERVICE);
+                mDisplayManager = (DisplayManager) getContext().getSystemService(
+                        Context.DISPLAY_SERVICE);
+                mDisplayManager.registerDisplayListener(mDisplayListener, null);
+
+                mIdleIntent = new Intent(PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED);
+                mIdleIntent.addFlags(Intent.FLAG_RECEIVER_REGISTERED_ONLY
+                        | Intent.FLAG_RECEIVER_FOREGROUND);
+
             // Go.
             readConfigurationLocked();
             updateSettingsLocked();
+
+            initGmsUid(mContext);
+
             mDirty |= DIRTY_BATTERY_STATE;
             updatePowerStateLocked();
         }
@@ -764,6 +787,25 @@ public final class PowerManagerService extends SystemService
         filter.addAction(Intent.ACTION_BATTERY_CHANGED);
         filter.setPriority(IntentFilter.SYSTEM_HIGH_PRIORITY);
         mContext.registerReceiver(new BatteryReceiver(), filter, null, mHandler);
+
+
+        filter = new IntentFilter();
+        filter.addAction(Intent.ACTION_BATTERY_CHANGED);
+        filter.setPriority(IntentFilter.SYSTEM_HIGH_PRIORITY);
+        mContext.registerReceiver(mBatteryReceiver, filter, null, mHandler);
+
+
+/*        filter = new IntentFilter();
+        filter.addAction(Intent.ACTION_POWER_DISCONNECTED);
+        filter.setPriority(IntentFilter.SYSTEM_HIGH_PRIORITY);
+        mContext.registerReceiver(mPowerDisconnectedReceiver, filter, null, mHandler);
+
+
+        filter = new IntentFilter();
+        filter.addAction(Intent.ACTION_POWER_CONNECTED);
+        filter.setPriority(IntentFilter.SYSTEM_HIGH_PRIORITY);
+        mContext.registerReceiver(mPowerConnectedReceiver, filter, null, mHandler);
+*/
 
         filter = new IntentFilter();
         filter.addAction(Intent.ACTION_DREAMING_STARTED);
@@ -1080,6 +1122,7 @@ public final class PowerManagerService extends SystemService
                         : wakeLock.mOwnerUid;
             }
 
+	    if(!isAllowedPermanantly(wakeLock.mTag)) {
 
                 try {
                     if (mAppOps != null &&
@@ -1090,9 +1133,11 @@ public final class PowerManagerService extends SystemService
 		    }
                 } catch (RemoteException e) {
                 }
+            }
 
             wakeUpNoUpdateLocked(SystemClock.uptimeMillis(), wakeLock.mTag, opUid,
                     opPackageName, opUid);
+	    
         }
     }
 
@@ -2682,6 +2727,7 @@ public final class PowerManagerService extends SystemService
     }
 
     boolean isDeviceIdleModeInternal() {
+
         synchronized (mLock) {
             return mDeviceIdleMode;
         }
@@ -2775,6 +2821,9 @@ public final class PowerManagerService extends SystemService
                 return false;
             }
             mDeviceIdleMode = enabled;
+
+            powerHintInternal(POWER_HINT_LOW_POWER, mDeviceIdleMode ? 1 : 0);
+
             updateWakeLockDisabledStatesLocked();
         }
         if (enabled) {
@@ -2808,6 +2857,17 @@ public final class PowerManagerService extends SystemService
         synchronized (mLock) {
             mDeviceIdleTempWhitelist = appids;
             if (mDeviceIdleMode) {
+//		if( mDeviceIdleTempWhitelist.length > 0 ) {
+//          	    Slog.d(TAG, "idle_mgr: setDeviceIdleTempWhitelistInternal cancelAlarmLocked");
+//		    cancelAlarmLocked();
+//		} else {
+//		    mMaintenance = false;
+//            	    Slog.d(TAG, "idle_mgr: setDeviceIdleTempWhitelistInternal updateAlarmLocked");
+//		    updateAlarmLocked();
+//		    if( mIdleIntent != null ) {
+//            	        mContext.sendBroadcastAsUser(mIdleIntent, UserHandle.ALL);
+//		    }
+//		}
                 updateWakeLockDisabledStatesLocked();
             }
         }
@@ -2878,7 +2938,7 @@ public final class PowerManagerService extends SystemService
 	 	    }
 	        }
 	        
-                if (mDeviceIdleMode) {
+                /*if (mDeviceIdleMode) {
                     // If we are in idle mode, we will ignore all partial wake locks that are
                     // for application uids that are not whitelisted.
                     if (appid >= Process.FIRST_APPLICATION_UID &&
@@ -2886,7 +2946,7 @@ public final class PowerManagerService extends SystemService
                             Arrays.binarySearch(mDeviceIdleTempWhitelist, appid) < 0 ) {
                         disabled = true;
                     }
-                }
+                }*/
 	    }
             if (wakeLock.mDisabled != disabled) {
                 wakeLock.mDisabled = disabled;
@@ -3650,7 +3710,9 @@ public final class PowerManagerService extends SystemService
 
             final int appid = UserHandle.getAppId(uid);
 
-            if ( Arrays.binarySearch(mDeviceIdleWhitelist, appid) >= 0 ) {
+            if ( isAllowedPermanantly(tag) || 
+		 Arrays.binarySearch(mDeviceIdleWhitelist, appid) >= 0 ||
+		 Arrays.binarySearch(mDeviceIdleTempWhitelist, appid) >= 0 ) {
 	                if( DEBUG ) Slog.i(TAG, "Check wakelock: Wakelock enabled: (WL) Uid=" + uid + ", tag=" + tag +  ", packageName=" + packageName);
 	    } else {
 
@@ -3937,11 +3999,16 @@ public final class PowerManagerService extends SystemService
         @Override // Binder call
         public boolean isDeviceIdleMode() {
 
-	    //final int callingUid = Binder.getCallingUid();
-	    //final int callingPid = Binder.getCallingPid();
+	    final int callingUid = Binder.getCallingUid();
+	    final int callingPid = Binder.getCallingPid();
 
-	    //if(DEBUG) Slog.d(TAG, "isDeviceIdle: uid=" + callingUid + " pid=" + callingPid);
-	    //if( DeviceIdleController.isGmsUid(callingUid) ) return false;
+	
+
+	    if(DEBUG) Slog.d(TAG, "isDeviceIdle: uid=" + callingUid + " pid=" + callingPid);
+	    if( isGmsUid(callingUid) ) {
+	        if(DEBUG) Slog.d(TAG, "isDeviceIdle: GMS hide uid=" + callingUid + " pid=" + callingPid);
+		return false;
+	    }
 
             final long ident = Binder.clearCallingIdentity();
             try {
@@ -3954,11 +4021,14 @@ public final class PowerManagerService extends SystemService
         @Override // Binder call
         public boolean isLightDeviceIdleMode() {
 
-	    //final int callingUid = Binder.getCallingUid();
-	    //final int callingPid = Binder.getCallingPid();
+	    final int callingUid = Binder.getCallingUid();
+	    final int callingPid = Binder.getCallingPid();
 
-	    //if(DEBUG) Slog.d(TAG, "isLightDeviceIdle: uid=" + callingUid + " pid=" + callingPid);
-	    //if( DeviceIdleController.isGmsUid(callingUid) ) return false;
+	    if(DEBUG) Slog.d(TAG, "isLightDeviceIdle: uid=" + callingUid + " pid=" + callingPid);
+	    if( isGmsUid(callingUid) ) {
+	        if(DEBUG) Slog.d(TAG, "isLightDeviceIdle: GMS hide uid=" + callingUid + " pid=" + callingPid);
+		return false;
+	    }
 
             final long ident = Binder.clearCallingIdentity();
             try {
@@ -4393,68 +4463,383 @@ public final class PowerManagerService extends SystemService
         }
     }
 
-
     private final Object mLockScreenOff = new Object();
 
-/*
-    public boolean checkServiceAllowedScreenOff(ServiceRecord service) {
-        final boolean interactive = mDisplayPowerRequest.isBrightOrDim();
-	if( interactive ) return true;
+    private final DisplayManager.DisplayListener mDisplayListener
+            = new DisplayManager.DisplayListener() {
+        @Override public void onDisplayAdded(int displayId) {
+        }
 
-        Slog.w(TAG, "checkServiceAllowedScreenOff:" + service);
-	return true;
+        @Override public void onDisplayRemoved(int displayId) {
+        }
+
+        @Override public void onDisplayChanged(int displayId) {
+            if (displayId == Display.DEFAULT_DISPLAY) {
+                synchronized (mLockScreenOff) {
+                    updateDisplayLocked();
+                }
+            }
+        }
+    };
+
+    private final BroadcastReceiver mBatteryReceiver = new BroadcastReceiver() {
+        @Override public void onReceive(Context context, Intent intent) {
+            switch (intent.getAction()) {
+                case Intent.ACTION_BATTERY_CHANGED: {
+        	    if (DEBUG) Slog.i(TAG, "mBatteryReceiver");
+                    synchronized (mLockScreenOff) {
+                        int plugged = intent.getIntExtra("plugged", 0);
+                        updateChargingLocked(plugged != 0);
+                    }
+                } break;
+            }
+        }
+    };
+
+    /*
+    private final BroadcastReceiver mPowerDisconnectedReceiver = new BroadcastReceiver() {
+        @Override public void onReceive(Context context, Intent intent) {
+      	    if (DEBUG) Slog.i(TAG, "mPowerDisconnectedReceiver");
+            synchronized (mLockScreenOff) {
+                updateChargingLocked(false);
+            }
+        }
+    };
+
+    private final BroadcastReceiver mPowerConnectedReceiver = new BroadcastReceiver() {
+        @Override public void onReceive(Context context, Intent intent) {
+      	    if (DEBUG) Slog.i(TAG, "mPowerConnectedReceiver");
+            synchronized (mLockScreenOff) {
+                updateChargingLocked(true);
+            }
+        }
+    };
+    */
+
+
+    private boolean mScreenOn = true;
+    private boolean mCharging = false;
+
+    private void updateDisplayLocked() {
+        Display mCurDisplay = mDisplayManager.getDisplay(Display.DEFAULT_DISPLAY);
+        // We consider any situation where the display is showing something to be it on,
+        // because if there is anything shown we are going to be updating it at some
+        // frequency so can't be allowed to go into deep sleeps.
+        boolean screenOn = mCurDisplay.getState() == Display.STATE_ON;
+        if (DEBUG) Slog.d(TAG, "updateDisplayLocked: screenOn=" + screenOn);
+        if (!screenOn && mScreenOn) {
+            mScreenOn = false;
+//	    if( !mCharging ) {
+//	        gotoIdleLocked();
+//	    }
+        } else if (screenOn && !mScreenOn) {
+            mScreenOn = true;
+//	    awakeFromIdleLocked();
+        }
     }
 
-    public boolean checkBroadcastIntentAllowedScreenOff(PendingIntent intent) {
-        final boolean interactive = mDisplayPowerRequest.isBrightOrDim();
-	if( interactive ) return true;
 
-        Slog.w(TAG, "checkBroadcastIntentAllowedScreenOff:" + intent);
-	return true;
-    }*/
+
+
+    void updateChargingLocked(boolean charging) {
+        if (DEBUG) Slog.i(TAG, "updateChargingLocked: charging=" + charging);
+        if (!charging && mCharging) {
+            mCharging = false;
+//	    if( !mScreenOn ) {
+//	        gotoIdleLocked();
+//	    }
+        } else if (charging && !mCharging) {
+            mCharging = true;
+//	    awakeFromIdleLocked();
+        }
+    }
+
+/*
+    private void gotoIdleLocked() {
+        if (DEBUG) Slog.i(TAG, "idle_mgr: idleModeChanged: gotoIdleLocked: charging=" + mCharging + ", screenOn=" + mScreenOn);
+	mMaintenance = false;
+	updateAlarmLocked();
+	setDeviceIdleModeInternal(true);
+	if( mIdleIntent != null ) {
+            mContext.sendBroadcastAsUser(mIdleIntent, UserHandle.ALL);
+	}
+    }
+
+
+    private void awakeFromIdleLocked() {
+        if (DEBUG) Slog.i(TAG, "idle_mgr: idleModeChanged: awakeFromIdleLocked: charging=" + mCharging + ", screenOn=" + mScreenOn);
+	mMaintenance = false;
+	setDeviceIdleModeInternal(false);
+	cancelAlarmLocked();
+	if( mIdleIntent != null ) {
+            mContext.sendBroadcastAsUser(mIdleIntent, UserHandle.ALL);
+	}
+    }
+
+
+
+    private final AlarmManager.OnAlarmListener mIdleAlarmListener
+            = new AlarmManager.OnAlarmListener() {
+        @Override
+        public void onAlarm() {
+                synchronized (mLockScreenOff) {
+        	    if( DEBUG ) Slog.w(TAG, "idle_mgr: OnAlarmListener");
+                    updateAlarmLocked();
+                }
+        }
+    };
+
+    private long mNextAlarmTime;
+
+    void cancelAlarmLocked() {
+        powerHintInternal(POWER_HINT_LOW_POWER, 0);
+        if( DEBUG ) Slog.w(TAG, "idle_mgr: cancel idle alarm");
+        if (mNextAlarmTime != 0) {
+            mNextAlarmTime = 0;
+            mAlarmManager.cancel(mIdleAlarmListener);
+        }
+	if( mDeviceIdleMode ) {
+	    if( DEBUG ) Slog.w(TAG, "idle_mgr: schedule idle guard");
+	    mMaintenance = false;
+	    scheduleAlarmLocked(15*1000, false);
+	}
+    }
+
+    void scheduleAlarmLocked(long delay, boolean idleUntil) {
+        if (mNextAlarmTime != 0) {
+            mNextAlarmTime = 0;
+            mAlarmManager.cancel(mIdleAlarmListener);
+        }
+        if (DEBUG) Slog.d(TAG, "idle_mgr: scheduleAlarmLocked(" + delay + ", " + idleUntil + ")");
+        mNextAlarmTime = SystemClock.elapsedRealtime() + delay;
+        if (idleUntil) {
+            mAlarmManager.setIdleUntil(AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    mNextAlarmTime, "PowerManagerService.idle", mIdleAlarmListener, mHandler);
+        } else {
+            mAlarmManager.set(AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    mNextAlarmTime, "PowerManagerService.idle", mIdleAlarmListener, mHandler);
+        }
+    }
+
+    boolean mMaintenance = false;
+    private void updateAlarmLocked() {
+	cancelAlarmLocked();
+	if( !mMaintenance ) {
+	    if( DEBUG ) Slog.w(TAG, "idle_mgr: going idle");
+            powerHintInternal(POWER_HINT_LOW_POWER, 1);
+	    //scheduleAlarmLocked(3*60*60*1000, true);
+	    mMaintenance = true;
+	} else {
+	    if( DEBUG ) Slog.w(TAG, "idle_mgr: going maintenance");
+            powerHintInternal(POWER_HINT_LOW_POWER, 0);
+	    //scheduleAlarmLocked(10*1000, false);
+	    mMaintenance = false;
+	}
+    }
+*/
+    public boolean isCharging() {
+	return mCharging;
+    }
+
+    public boolean isScreenOn() {
+	return mScreenOn;
+    }
+
+    public boolean checkAllowAlarm(Object operation, int type, int callingUid, String callingPackage, String tag, String listenerTag) {
+    
+	//final long ident = Binder.clearCallingIdentity();
+        //try {
+	    return checkAllowAlarmInternal(operation, type, callingUid, callingPackage, tag, listenerTag);
+        //} finally {
+        //    Binder.restoreCallingIdentity(ident);
+        //}
+    }
+
+
+    public boolean checkAllowAlarmInternal(Object operation, int type, int callingUid, String callingPackage, String tag, String listenerTag) {
+ 
+
+	boolean BlockAlarm = false;
+
+  	    if( operation == null && listenerTag != null && listenerTag.equals("*job.delay*") ){
+   	    	Slog.d(TAG, "WAKE Alarm:  *job.delay*: " + type + " - " + listenerTag + " - " + callingPackage + " - " + tag);
+		BlockAlarm = true; 
+  	    } else if( operation == null && listenerTag != null && listenerTag.equals("*job.deadline*") ){
+   	    	Slog.d(TAG, "WAKE Alarm:  *job.deadline*: " + type + " - " + listenerTag + " - " + callingPackage + " - " + tag);
+		BlockAlarm = true; 
+	    } else if( operation == null && listenerTag != null && listenerTag.startsWith("WifiConnectivityManager")) {
+   	    	Slog.d(TAG, "WAKE Alarm:  WifiConnectivityManager: " + type + " - " + listenerTag + " - " + callingPackage + " - " + tag);
+		BlockAlarm = true;
+	    } else if( operation == null && listenerTag != null && listenerTag.startsWith("SupplicantWifiScannerImpl")) {
+   	    	Slog.d(TAG, "WAKE Alarm:  SupplicantWifiScanner: " + type + " - " + listenerTag + " - " + callingPackage + " - " + tag);
+		BlockAlarm = true;
+	    } else if( operation == null && listenerTag != null && listenerTag.startsWith("NETWORK_LINGER_COMPLETE")) {
+   	    	Slog.d(TAG, "WAKE Alarm:  NETWORK_LINGER_COMPLETE: " + type + " - " + listenerTag + " - " + callingPackage + " - " + tag);
+		BlockAlarm = true;
+	    } else if( operation != null && tag.equals("android.appwidget.action.APPWIDGET_UPDATE") ) {
+   	    	Slog.d(TAG, "WAKE Alarm:  APPWIDGET_UPDATE: " + type + " - " + listenerTag + " - " + callingPackage + " - " + tag);
+		BlockAlarm = true;
+	    } else if ( tag.contains("com.google.android.gms.gcm") 
+		 | tag.startsWith("com.google.android.intent.action.GCM_RECONNECT")
+		 | tag.contains("firebase") ) {
+   	    	Slog.d(TAG, "WAKE Alarm:  GCM/FCM: " + type + " - " + listenerTag + " - " + callingPackage + " - " + tag);
+		BlockAlarm = false;
+	    } else if ( tag.contains("com.google.android.location") ) {
+   	    	Slog.d(TAG, "WAKE Alarm:  GMS/Location: " + type + " - " + listenerTag + " - " + callingPackage + " - " + tag);
+		BlockAlarm = true;
+	    } else if ( tag.contains("com.android.internal.telephony.data-stall") ) {
+   	    	Slog.d(TAG, "WAKE Alarm:  Phone - data-stall" + type + " - " + listenerTag + " - " + callingPackage + " - " + tag);
+		BlockAlarm = true;
+	    } else {
+		BlockAlarm = false;		
+	    }
+
+
+	if( mAppOps != null ) {
+	    try {
+	        if ( tag.equals("com.google.android.gms.gcm.HEARTBEAT_ALARM") ||
+                    !( tag.contains("com.google.android.gms.gcm") 
+		     | tag.startsWith("com.google.android.intent.action.GCM_RECONNECT")
+		     | tag.contains("firebase") )
+		     && mAppOps.noteOperation(AppOpsManager.OP_WAKE_FROM_IDLE, callingUid, callingPackage)
+                	!= AppOpsManager.MODE_ALLOWED) {
+	    	    Slog.e(TAG, "WAKE Alarm: Blocked by AppOps: " + type + " - " + listenerTag + " - " + callingPackage + " - " + tag + " - " + callingUid);
+		    BlockAlarm = true;
+	        } else {
+		    Slog.e(TAG, "WAKE Alarm: Allowed by AppOps: " + type + " - " + listenerTag + " - " + callingPackage + " - " + tag + " - " + callingUid);
+		}
+	    } catch (RemoteException e) {
+		Slog.e(TAG,"Exception checking AppOps :" + e);
+	    } catch (SecurityException e) {
+		Slog.e(TAG,"Exception checking AppOps :" + e);
+	    }
+	}
+
+	return BlockAlarm;
+    }
+
 
     public boolean checkAllowIntent(int uid, String packageName, int callingPid,
+            boolean allowWhenForeground, Intent intent) {
+    
+	//final long ident = Binder.clearCallingIdentity();
+        //try {
+	    return checkAllowIntentInternal(uid, packageName, callingPid, allowWhenForeground, intent);
+       // } finally {
+        //    Binder.restoreCallingIdentity(ident);
+        //}
+
+       // Slog.w(TAG, "checkAllowIntent: Intent allowed: (something wrong) uid=" + uid + ", pkg=" + packageName + ", pid=" + callingPid + ", intent=" + intent);
+	//return true;
+    }
+
+
+    public boolean checkAllowIntentInternal(int uid, String packageName, int callingPid,
             boolean allowWhenForeground, Intent intent) {
 
 
         Slog.w(TAG, "checkAllowIntent: uid=" + uid + ", pkg=" + packageName + ", pid=" + callingPid + ", intent=" + intent);
 
-        final boolean interactive = mDisplayPowerRequest.isBrightOrDim();
-	if( interactive ) return true;
+        //final boolean interactive = mDisplayPowerRequest.isBrightOrDim();
+	if( mScreenOn || mCharging) {
+	    Slog.d(TAG, "checkAllowIntent: Intent allowed: (interactive or charging) pkg=" + packageName + ", uid=" + uid + ", intent=" + intent);
+	    return true;
+	}
 
         final int appid = UserHandle.getAppId(uid);
 
-	if( packageName.equals("com.google.android.gms") && intent == null ) return true;
-	if( appid < Process.FIRST_APPLICATION_UID && intent == null ) return true;
+        if (appid < Process.FIRST_APPLICATION_UID ) {
+//            Slog.d(TAG, "checkAllowIntent: Intent allowed: (system) pkg=" + packageName + ", uid=" + uid + ", intent=" + intent);
+//	      return true;
+        }
 
-	if( packageName.equals("com.google.android.gms") && isAllowedGmsService(intent) ) return true;
+        if ( Arrays.binarySearch(mDeviceIdleTempWhitelist, appid) >=0 ) {
+            Slog.d(TAG, "checkAllowIntent: Intent allowed: (whitelisted) pkg=" + packageName + ", uid=" + uid + ", intent=" + intent);
+	    return true;
+        }
+
+
+	if( packageName.equals("com.google.android.gms") && intent == null ) {
+	        Slog.d(TAG, "checkAllowIntent: Intent allowed: (unidentified GMS) pkg=" + packageName + ", uid=" + uid + ", intent=" + intent);
+		return true;
+	}
+	if( appid < Process.FIRST_APPLICATION_UID && intent == null ) { 
+	        Slog.d(TAG, "checkAllowIntent: Intent allowed: (system service) pkg=" + packageName + ", uid=" + uid + ", intent=" + intent);
+	 	return true;
+	}
+
+	if( packageName.equals("com.google.android.gms") && isAllowedGmsService(intent) ) { 
+	        Slog.d(TAG, "checkAllowIntent: Intent allowed: (special GMS service) pkg=" + packageName + ", uid=" + uid + ", intent=" + intent);
+		return true;
+	}
 
         try {
 	    if (mAppOps != null ) {
 	        if( mAppOps.noteOperation(AppOpsManager.OP_WAKE_FROM_IDLE, uid, packageName)
 	            != AppOpsManager.MODE_ALLOWED) {
-	            Slog.d(TAG, "Intent blocked: pkg=" + packageName + ", uid=" + uid + ", intent=" + intent);
+	            Slog.d(TAG, "checkAllowIntent: Intent blocked: pkg=" + packageName + ", uid=" + uid + ", intent=" + intent);
 	            return false;
-		}
+		} else {
+	            Slog.d(TAG, "checkAllowIntent: Intent allowed: pkg=" + packageName + ", uid=" + uid + ", intent=" + intent);
+	        }
 	    }
 	} catch (RemoteException e) {
+	            Slog.d(TAG, "checkAllowIntent: remote exception checking : pkg=" + packageName + ", uid=" + uid + ", intent=" + intent);
+	            Slog.d(TAG, "Ex: " + e);
+	} catch (SecurityException e) {
+	            Slog.d(TAG, "checkAllowIntent: security exception checking : pkg=" + packageName + ", uid=" + uid + ", intent=" + intent);
+	            Slog.d(TAG, "Ex: " + e);
 	}
 
 
 	return true;
 
     }
-    
+
+
     public boolean checkWakeLockAllowedScreenOff(WakeLock wakeLock) {
-        final boolean interactive = mDisplayPowerRequest.isBrightOrDim();
-	if( interactive ) return true;
+    
+	//final long ident = Binder.clearCallingIdentity();
+        //try {
+	    return checkWakeLockAllowedScreenOffInternal(wakeLock);
+        //} finally {
+        //    Binder.restoreCallingIdentity(ident);
+        //}
+    }
+    
+    public boolean checkWakeLockAllowedScreenOffInternal(WakeLock wakeLock) {
 
         Slog.w(TAG, "checkWakeLockAllowedScreenOff:" + wakeLock);
 
 	if( isBlockedPermanently(wakeLock) ) return false;
-	if( isAllowedPermanantly(wakeLock) ) return true;
+	if( isAllowedPermanantly(wakeLock.mTag) ) return true;
 
-	return true;
+	if( mScreenOn ) return true;
+	if( mCharging ) return true;
+
+        try {
+	    if (mAppOps != null ) {
+	        if( mAppOps.noteOperation(AppOpsManager.OP_WAKE_FROM_IDLE, wakeLock.mOwnerUid, wakeLock.mPackageName)
+	            == AppOpsManager.MODE_ALLOWED) {
+        	    if( DEBUG ) Slog.d(TAG, "Wakelock allowed: pkg=" + wakeLock.mPackageName + ", uid=" + wakeLock.mOwnerUid + ", tag=" + wakeLock.mTag );
+	            return true;
+		}
+
+                if (wakeLock.mWorkSource != null && wakeLock.mWorkSource.getName(0) != null) {
+	            if( mAppOps.noteOperation(AppOpsManager.OP_WAKE_FROM_IDLE, wakeLock.mWorkSource.get(0), wakeLock.mWorkSource.getName(0))
+	                == AppOpsManager.MODE_ALLOWED) {
+        	        if( DEBUG ) Slog.d(TAG, "Wakelock allowed by worksource: pkg=" + wakeLock.mWorkSource.getName(0) + ", uid=" + wakeLock.mWorkSource.get(0) + ", tag=" + wakeLock.mTag);
+	                return true;
+		    }
+
+	        }
+	    }
+	} catch (RemoteException e) {
+	}
+
+	if( DEBUG ) Slog.d(TAG, "Wakelock blocked: pkg=" + wakeLock.mPackageName + ", uid=" + wakeLock.mOwnerUid + ", tag=" + wakeLock.mTag );
+
+	return false;
     }
      
     private boolean isBlockedPermanently(WakeLock wakeLock) {
@@ -4473,6 +4858,7 @@ public final class PowerManagerService extends SystemService
 	    if( wakeLock.mTag.equals("LocationManagerService") ||
 	        wakeLock.mTag.equals("SyncLoopWakeLock") ||
 	        wakeLock.mTag.equals("ConnectivityService") ||
+	        wakeLock.mTag.equals("NetworkStats") ||
 	        wakeLock.mTag.startsWith("*job*") ||
 	        wakeLock.mTag.startsWith("*sync*") ) {
 	        return true;
@@ -4485,10 +4871,10 @@ public final class PowerManagerService extends SystemService
 	return false;
     }
 
-    private boolean isAllowedPermanantly(WakeLock wakeLock) {
-	if( wakeLock.mTag.equals("RingtonePlayer") ||
-	    wakeLock.mTag.equals("GCM_READ") ||
-	    wakeLock.mTag.equals("GOOGLE_C2DM") ) {
+    private boolean isAllowedPermanantly(String  tag) {
+	if( tag.equals("RingtonePlayer") ||
+	    tag.equals("GCM_READ") ||
+	    tag.equals("GOOGLE_C2DM") ) {
 		return true;
 	}
 	return false;
@@ -4496,20 +4882,72 @@ public final class PowerManagerService extends SystemService
 
     private boolean isAllowedGmsService(Intent intent) {
 	if( intent == null ) return true;
+        Slog.d(TAG, "checkAllowIntent: gmsintent=" + intent );
+
 	ComponentName cmp = intent.getComponent();
-	if( cmp == null ) return false;
-	String cls = cmp.getClassName();
-	if( cls == ".gcm.GcmService" ) return true;
-	if( cls == ".tapandpay.gcmtask.TapAndPayGcmTaskService" ) return true;
-	if( cls == ".phenotype.service.PhenotypeService" ) return true;
-	if( cls == ".chimera.GmsIntentOperationService" ) return true;
-	if( cls == ".udc.service.UdcContextInitService" ) return true;
-	if( cls == ".chimera.PersistentBoundBrokerService" ) return true;
-	if( cls == ".instantapps.routing.DomainFilterUpdateService" ) return true;
-	if( cls == ".auth.authzen.api.service.internaldata.CryptauthInternalDataService" ) return true;
-	if( cls == ".auth.easyunlock.authorization.InitializerIntentService" ) return true;
-	if( cls == ".auth.api.credentials.sync.CredentialSyncReceiverService" ) return true;
-	if( cls == ".auth.setup.devicesignals.LockScreenService" ) return true;
+        Slog.d(TAG, "checkAllowIntent: cmp=" + cmp );
+
+	if( cmp != null ) {
+	    String cls = cmp.toString();
+            Slog.d(TAG, "checkAllowIntent: cls=" + cls );
+ 	    if( cls != null ) {
+	        if( cls.contains(".gcm.GcmService") ) return true;
+ 	        if( cls.contains(".tapandpay.gcmtask.TapAndPayGcmTaskService") ) return true;
+	        if( cls.contains(".phenotype.service.PhenotypeService") ) return true;
+ 	        if( cls.contains(".chimera.GmsIntentOperationService") ) return true;
+	        if( cls.contains(".udc.service.UdcContextInitService") ) return true;
+	        if( cls.contains(".chimera.PersistentBoundBrokerService") ) return true;
+	        if( cls.contains(".instantapps.routing.DomainFilterUpdateService") ) return true;
+	        if( cls.contains(".auth.authzen.api.service.internaldata.CryptauthInternalDataService") ) return true;
+	        if( cls.contains(".auth.easyunlock.authorization.InitializerIntentService") ) return true;
+	        if( cls.contains(".auth.api.credentials.sync.CredentialSyncReceiverService") ) return true;
+	        if( cls.contains(".auth.setup.devicesignals.LockScreenService") ) return true;
+	        if( cls.contains(".gcm.nts.SchedulerInternalReceiver") ) return true;
+	        if( cls.contains(".service.ContextManagerService") ) return true;
+	    }
+            Slog.d(TAG, "checkAllowIntent: cls=" + cls + " blocked");
+	}
+
+	String act = intent.getAction();
+	if( act != null ) {
+            Slog.d(TAG, "checkAllowIntent: act=" + act );
+	    if( act.contains("com.google.android.c2dm") ) return true;
+	    if( act.contains("com.google.android.gms.gcm") ) return true;
+            Slog.d(TAG, "checkAllowIntent: act=" + act + " blocked");
+	}
+	
 	return false;
     }
+
+    private boolean isGmsUid(int uid) {
+	if( mGmsUid == -1 ) return false;
+	if(  UserHandle.getAppId(uid) == getGmsUid() ) return true;
+	return false;
+    }
+
+
+    private int mGmsUid = -1;
+    public int getGmsUid() {
+	return mGmsUid;
+    }
+    private void initGmsUid(Context context) {
+	    try {		
+
+	    	if( DEBUG ) Slog.w(TAG, "Initializing GMS Uid");
+		final PackageManager pm = context.getPackageManager();
+
+		ApplicationInfo ai = pm.getApplicationInfo("com.google.android.gms",PackageManager.MATCH_SYSTEM_ONLY);
+		if( ai != null ) {
+		    mGmsUid = UserHandle.getAppId(ai.uid);
+		    if( DEBUG ) Slog.w(TAG, "GMS Uid=" + mGmsUid);
+	        } else {
+                    if( DEBUG ) Slog.w(TAG, "Seems GMS is not installed");
+		    mGmsUid = -1;
+		}
+	    } catch (PackageManager.NameNotFoundException e) {
+                if( DEBUG) Slog.w(TAG, "Seems GMS is not installed");
+		mGmsUid = -1;
+	    }
+    }
+
 }
