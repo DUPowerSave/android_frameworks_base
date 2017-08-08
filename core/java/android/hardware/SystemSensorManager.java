@@ -144,6 +144,14 @@ public class SystemSensorManager extends SensorManager {
             return false;
         }
 
+        if (sensor.getType() == Sensor.TYPE_SIGNIFICANT_MOTION) {
+            String pkgName = mContext.getPackageName();
+            Log.w(TAG, "Preventing " + pkgName + "from draining battery using " +
+                                    "significant motion sensor");
+            return false;
+        }
+
+
         // Invariants to preserve:
         // - one Looper per SensorEventListener
         // - one Looper per SensorEventQueue

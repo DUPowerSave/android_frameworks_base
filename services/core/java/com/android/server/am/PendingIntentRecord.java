@@ -226,6 +226,7 @@ final class PendingIntentRecord extends IIntentSender.Stub {
                     activityContainer.mParentActivity.state
                             != ActivityStack.ActivityState.RESUMED) {
                 // Cannot start a child activity if the parent is not resumed.
+                Slog.w(TAG, "Cannot start a child activity if the parent is not resumed." + intent);
                 return ActivityManager.START_CANCELED;
             }
             if (!canceled) {

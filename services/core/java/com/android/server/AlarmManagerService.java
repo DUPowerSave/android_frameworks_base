@@ -102,7 +102,7 @@ class AlarmManagerService extends SystemService {
     static final boolean DEBUG_VALIDATE = localLOGV || false;
     static final boolean DEBUG_ALARM_CLOCK = localLOGV || false;
     static final boolean DEBUG_LISTENER_CALLBACK = localLOGV || false;
-    static final boolean RECORD_ALARMS_IN_HISTORY = true;
+    static final boolean RECORD_ALARMS_IN_HISTORY = false;
     static final boolean RECORD_DEVICE_IDLE_ALARMS = false;
     static final int ALARM_EVENT = 1;
     static final String TIMEZONE_PROPERTY = "persist.sys.timezone";
@@ -1148,17 +1148,28 @@ class AlarmManagerService extends SystemService {
     }
 
     private void setImplLocked(Alarm a, boolean rebatching, boolean doValidate) {
+
+        boolean needRebatch = false;
+
         if ((a.flags&AlarmManager.FLAG_IDLE_UNTIL) != 0) {
             // This is a special alarm that will put the system into idle until it goes off.
             // The caller has given the time they want this to happen at, however we need
             // to pull that earlier if there are existing alarms that have requested to
             // bring us out of idle at an earlier time.
-            if (mNextWakeFromIdle != null && a.whenElapsed > mNextWakeFromIdle.whenElapsed) {
-                a.when = a.whenElapsed = a.maxWhenElapsed = mNextWakeFromIdle.whenElapsed;
-                Slog.d(TAG, "idle_mgr: Next wake from idle moved to: " + a.when);
+
+            final long nowElapsed = SystemClock.elapsedRealtime();
+
+            if (mNextWakeFromIdle != null && a.whenElapsed > mNextWakeFromIdle.whenElapsed ) {
+                //a.when = a.whenElapsed = a.maxWhenElapsed = mNextWakeFromIdle.whenElapsed - 100;
+
+            	//String ntag = mNextWakeFromIdle.listenerTag;
+	        //if( mNextWakeFromIdle.operation != null ) {
+		//    ntag = mNextWakeFromIdle.operation.getTag("");
+	        //}
+
+                //Slog.d(TAG, "idle_mgr: DeviceIdleController.deep moved to: " + a.when + "(" + (a.when - nowElapsed) + ") for " + ntag );
             }
             // Add fuzz to make the alarm go off some time before the actual desired time.
-            final long nowElapsed = SystemClock.elapsedRealtime();
             final int fuzz = fuzzForDuration(a.whenElapsed-nowElapsed);
             if (fuzz > 0) {
                 if (mRandom == null) {
@@ -1197,6 +1208,10 @@ class AlarmManagerService extends SystemService {
 	            BlockAlarm = mPowerManagerService.checkAllowAlarm(a.operation,a.type,a.uid,a.packageName,tag,a.listenerTag);
 		    if( BlockAlarm ) {
 	    	        Slog.e(TAG, "Alarm IDLE blocked: type=" + a.type + ", listenerTag=" + a.listenerTag + ", creatorUid=" + a.creatorUid +  ", uid=" + a.uid + ", pkg=" + a.packageName + ", tag=" + tag + " alarmClock=" + a.alarmClock);
+			if( mNextWakeFromIdle == a ) {
+				mNextWakeFromIdle = null;
+            			needRebatch = true;
+			}
 		        return;
 		    }
 	        } else {
@@ -1256,7 +1271,6 @@ class AlarmManagerService extends SystemService {
             mNextAlarmClockMayChange = true;
         }
 
-        boolean needRebatch = false;
 
         if ((a.flags&AlarmManager.FLAG_IDLE_UNTIL) != 0) {
             if (RECORD_DEVICE_IDLE_ALARMS) {
@@ -1343,6 +1357,10 @@ class AlarmManagerService extends SystemService {
                 flags &= ~AlarmManager.FLAG_IDLE_UNTIL;
             }
 
+
+	    if ((flags&AlarmManager.FLAG_IDLE_UNTIL) != 0) {
+		flags |= AlarmManager.FLAG_STANDALONE;
+	    }
             // If this is an exact time alarm, then it can't be batched with other alarms.
             if (windowLength == AlarmManager.WINDOW_EXACT) {
                 flags |= AlarmManager.FLAG_STANDALONE;
@@ -2552,6 +2570,7 @@ class AlarmManagerService extends SystemService {
             while (true)
             {
                 int result = waitForAlarm(mNativeData);
+                Slog.d(TAG, "AlarmThread: step");
                 mLastWakeup = SystemClock.elapsedRealtime();
 
                 triggerList.clear();
@@ -2707,7 +2726,7 @@ class AlarmManagerService extends SystemService {
         public static final int SEND_NEXT_ALARM_CLOCK_CHANGED = 2;
         public static final int LISTENER_TIMEOUT = 3;
         public static final int REPORT_ALARMS_ACTIVE = 4;
-        //public static final int WHITELIST_ALARM_APP = 5;
+        public static final int WHITELIST_ALARM_APP = 5;
         
         public AlarmHandler() {
         }
@@ -2753,13 +2772,13 @@ class AlarmManagerService extends SystemService {
                     }
                     break;
 
-//                case WHITELIST_ALARM_APP:
-//                    if (mLocalDeviceIdleController != null) {
-//			    Slog.i(TAG, "Check wakelock: Add TempWhitelist uid=" + msg.arg1);
-//		            mLocalDeviceIdleController.addPowerSaveTempWhitelistAppDirect(msg.arg1, 10000,
-//                		    true, "pe from uid:" + msg.arg1);
-//                    }
-//                    break;
+                case WHITELIST_ALARM_APP:
+                    if (mLocalDeviceIdleController != null) {
+			    //Slog.i(TAG, "Check wakelock: Add TempWhitelist uid=" + msg.arg2);
+		            mLocalDeviceIdleController.addPowerSaveTempWhitelistAppDirect(msg.arg2, 10000,
+                	    	    true, "pe from uid:" + msg.arg2);
+                    }
+                    break;
 
 
                 default:
@@ -3123,9 +3142,12 @@ class AlarmManagerService extends SystemService {
  	    ", wsFirstName=" + wsFirstName + 
  	    ", wsFirstUid=" + wsFirstUid);
 
-            //mHandler.obtainMessage(AlarmHandler.WHITELIST_ALARM_APP, alarm.creatorUid, alarm.uid, alarm.packageName ).sendToTarget();
+            mHandler.obtainMessage(AlarmHandler.WHITELIST_ALARM_APP, alarm.creatorUid, alarm.uid, alarm.packageName ).sendToTarget();
 
-	    /*
+	    if( alarm == mPendingIdleUntil ) {
+		mPowerManagerService.noteDeviceIdleModeChange();
+	    }
+	    
             if (alarm.workSource != null && alarm.workSource.size() > 0) {
                 for (int wi=0; wi<alarm.workSource.size(); wi++) {
                     final String wsName = alarm.workSource.getName(wi);
@@ -3134,7 +3156,7 @@ class AlarmManagerService extends SystemService {
             	 	mHandler.obtainMessage(AlarmHandler.WHITELIST_ALARM_APP, alarm.creatorUid, wsUid, wsName ).sendToTarget();
 		    }
                 }
-            }*/
+            }
 
             if (alarm.operation != null) {
                 // PendingIntent alarm

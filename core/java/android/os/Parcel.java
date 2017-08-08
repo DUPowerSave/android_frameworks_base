@@ -189,6 +189,7 @@ import dalvik.system.VMRuntime;
 public final class Parcel {
     private static final boolean DEBUG_RECYCLE = false;
     private static final boolean DEBUG_ARRAY_MAP = false;
+    private static final boolean DEBUG_ARRAY_SDV = false;
     private static final String TAG = "Parcel";
 
     @SuppressWarnings({"UnusedDeclaration"})
@@ -2714,6 +2715,10 @@ public final class Parcel {
             Object key = readValue(loader);
             Object value = readValue(loader);
             outVal.put(key, value);
+	    if (DEBUG_ARRAY_SDV) {
+		Log.d(TAG,"key=" + key + ", value=" + value);
+	    }
+
             N--;
         }
     }
@@ -2734,6 +2739,9 @@ public final class Parcel {
                     + (dataPosition()-startPos) + " bytes: key=0x"
                     + Integer.toHexString((key != null ? key.hashCode() : 0)) + " " + key);
             outVal.append(key, value);
+	    if (DEBUG_ARRAY_SDV) {
+		Log.d(TAG,"key=" + key + ", value=" + value);
+	    }
             N--;
         }
         outVal.validate();
@@ -2752,6 +2760,10 @@ public final class Parcel {
                     + (key != null ? key.hashCode() : 0) + " " + key);
             Object value = readValue(loader);
             outVal.put(key, value);
+	    if (DEBUG_ARRAY_SDV) {
+		Log.d(TAG,"key=" + key + ", value=" + value);
+	    }
+
             N--;
         }
     }
@@ -2793,6 +2805,9 @@ public final class Parcel {
             Object value = readValue(loader);
             //Log.d(TAG, "Unmarshalling value=" + value);
             outVal.add(value);
+	    if (DEBUG_ARRAY_SDV) {
+		Log.d(TAG,"key=list, value=" + value);
+	    }
             N--;
         }
     }
@@ -2803,6 +2818,9 @@ public final class Parcel {
             Object value = readValue(loader);
             //Log.d(TAG, "Unmarshalling value=" + value);
             outVal[i] = value;
+	    if (DEBUG_ARRAY_SDV) {
+		Log.d(TAG,"key=array, value=" + value);
+	    }
         }
     }
 
@@ -2813,6 +2831,10 @@ public final class Parcel {
             Object value = readValue(loader);
             //Log.i(TAG, "Unmarshalling key=" + key + " value=" + value);
             outVal.append(key, value);
+	    if (DEBUG_ARRAY_SDV) {
+		Log.d(TAG,"key=" + key + ", value=" + value);
+	    }
+
             N--;
         }
     }
@@ -2824,6 +2846,9 @@ public final class Parcel {
             boolean value = this.readByte() == 1;
             //Log.i(TAG, "Unmarshalling key=" + key + " value=" + value);
             outVal.append(key, value);
+	    if (DEBUG_ARRAY_SDV) {
+		Log.d(TAG,"key=" + key + ", value=" + value);
+	    }
             N--;
         }
     }

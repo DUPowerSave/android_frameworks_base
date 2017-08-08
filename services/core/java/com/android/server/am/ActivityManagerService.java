@@ -7336,19 +7336,23 @@ public final class ActivityManagerService extends ActivityManagerNative
                 Slog.w(TAG, "tempWhitelistAppForPowerSave() no ProcessRecord for pid " + callerPid);
                 return;
             }
-            if (!pr.whitelistManager) {
-                if (DEBUG_WHITELISTS) {
-                    Slog.d(TAG, "tempWhitelistAppForPowerSave() for target " + targetUid + ": pid "
-                            + callerPid + " is not allowed");
-                }
-                return;
-            }
+            //if (!pr.whitelistManager) {
+            //    if (DEBUG_WHITELISTS) {
+            //        Slog.d(TAG, "tempWhitelistAppForPowerSave() for target " + targetUid + ": pid "
+            //                + callerPid + " is not allowed");
+            //    }
+            //    return;
+            //}
         }
 
         final long token = Binder.clearCallingIdentity();
         try {
             mLocalDeviceIdleController.addPowerSaveTempWhitelistAppDirect(targetUid, duration,
                     true, "pe from uid:" + callerUid);
+	    if( callerUid !=  targetUid ) {
+            mLocalDeviceIdleController.addPowerSaveTempWhitelistAppDirect(callerUid, duration,
+                    true, "pe from uid:" + callerUid);
+	    }
         } finally {
             Binder.restoreCallingIdentity(token);
         }
@@ -7977,7 +7981,7 @@ public final class ActivityManagerService extends ActivityManagerNative
         UidRecord uidRec = mActiveUids.get(uid);
 
 
-        Slog.w(TAG, "checkAllowIntent: checkAllowBackgroundLocked uid=" + uid + ", pkg=" + packageName + ", pid=" + callingPid + ", intent=" + intent);
+        if(DEBUG_SERVICE) Slog.w(TAG, "checkAllowIntent: checkAllowBackgroundLocked uid=" + uid + ", pkg=" + packageName + ", pid=" + callingPid + ", intent=" + intent);
 
         if( mPowerManagerService!=null && !mPowerManagerService.checkAllowIntent(uid, packageName, callingPid, allowWhenForeground, intent)  ) {
             return ActivityManager.APP_START_MODE_DISABLED;
@@ -19514,7 +19518,9 @@ public final class ActivityManagerService extends ActivityManagerNative
 
         final int activitiesSize = app.activities.size();
 
-        if (app.maxAdj <= ProcessList.FOREGROUND_APP_ADJ) {
+
+        if (app.maxAdj <= ProcessList.FOREGROUND_APP_ADJ ||
+	    ( mPowerManagerService != null && mPowerManagerService.checkKeepRunnig(app.info) ) ) {
             // The max adjustment doesn't allow this app to be anything
             // below foreground, so it is not worth doing work for it.
             app.adjType = "fixed";

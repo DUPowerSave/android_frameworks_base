@@ -84,7 +84,7 @@ public class DeviceIdleJobsController extends StateController {
                     || PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED.equals(action)) {
                 updateIdleMode(mPowerManager != null
                         ? (mPowerManager.isDeviceIdleMode()
-                                || mPowerManager.isLightDeviceIdleMode())
+                                || mPowerManager.isLightDeviceIdleMode() )
                         : false);
             } else if (PowerManager.ACTION_POWER_SAVE_WHITELIST_CHANGED.equals(action)) {
                 updateWhitelist();

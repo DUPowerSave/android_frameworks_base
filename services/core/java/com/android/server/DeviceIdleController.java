@@ -84,6 +84,7 @@ import com.android.internal.os.BackgroundThread;
 import com.android.internal.util.FastXmlSerializer;
 import com.android.internal.util.XmlUtils;
 import com.android.server.am.BatteryStatsService;
+import com.android.server.power.PowerManagerService;
 
 import org.xmlpull.v1.XmlPullParser;
 import org.xmlpull.v1.XmlPullParserException;
@@ -117,6 +118,7 @@ public class DeviceIdleController extends SystemService
     private IBatteryStats mBatteryStats;
     private PowerManagerInternal mLocalPowerManager;
     private PowerManager mPowerManager;
+    private PowerManagerService mPowerManagerService;
     private ConnectivityService mConnectivityService;
     private AlarmManagerService.LocalService mLocalAlarmManager;
     private INetworkPolicyManager mNetworkPolicyManager;
@@ -823,10 +825,10 @@ public class DeviceIdleController extends SystemService
                         !COMPRESS_TIME ? 5 * 1000L : 1 * 1000L);
                 MIN_LIGHT_MAINTENANCE_TIME = mParser.getLong(
                         KEY_MIN_LIGHT_MAINTENANCE_TIME,
-                        !COMPRESS_TIME ? 5 * 1000L : 1 * 1000L);
+                        !COMPRESS_TIME ? 1 * 1000L : 1 * 1000L);
                 MIN_DEEP_MAINTENANCE_TIME = mParser.getLong(
                         KEY_MIN_DEEP_MAINTENANCE_TIME,
-                        !COMPRESS_TIME ? 10 * 1000L : 5 * 1000L);
+                        !COMPRESS_TIME ? 1 * 1000L : 1 * 1000L);
                 long inactiveTimeoutDefault = (mHasWatch ? 3 : 3) * 1000L;
                 INACTIVE_TIMEOUT = mParser.getLong(KEY_INACTIVE_TIMEOUT,
                         !COMPRESS_TIME ? inactiveTimeoutDefault : (inactiveTimeoutDefault / 10));
@@ -837,7 +839,7 @@ public class DeviceIdleController extends SystemService
                 LOCATION_ACCURACY = mParser.getFloat(KEY_LOCATION_ACCURACY, 20);
                 MOTION_INACTIVE_TIMEOUT = mParser.getLong(KEY_MOTION_INACTIVE_TIMEOUT,
                         !COMPRESS_TIME ? 0 * 60 * 1000L : 0 * 1000L);
-                long idleAfterInactiveTimeout = (mHasWatch ? 1 : 1) * 1000L;
+                long idleAfterInactiveTimeout = (mHasWatch ? 0 : 0) * 1000L;
                 IDLE_AFTER_INACTIVE_TIMEOUT = mParser.getLong(KEY_IDLE_AFTER_INACTIVE_TIMEOUT,
                         !COMPRESS_TIME ? idleAfterInactiveTimeout
                                        : (idleAfterInactiveTimeout / 10));
@@ -1064,7 +1066,7 @@ public class DeviceIdleController extends SystemService
                     final boolean deepChanged = mLocalPowerManager.setDeviceIdleMode(false);
                     final boolean lightChanged = mLocalPowerManager.setLightDeviceIdleMode(false);
                     try {
-                        //mNetworkPolicyManager.setDeviceIdleMode(false);
+                        mNetworkPolicyManager.setDeviceIdleMode(false);
                         mBatteryStats.noteDeviceIdleMode(BatteryStats.DEVICE_IDLE_MODE_OFF,
                                 null, Process.myUid());
                     } catch (RemoteException e) {
@@ -1431,6 +1433,9 @@ public class DeviceIdleController extends SystemService
                         ServiceManager.getService(Context.NETWORK_POLICY_SERVICE));
                 mDisplayManager = (DisplayManager) getContext().getSystemService(
                         Context.DISPLAY_SERVICE);
+
+                mPowerManagerService = LocalServices.getService(PowerManagerService.class);
+
                 mSensorManager = (SensorManager) getContext().getSystemService(Context.SENSOR_SERVICE);
                 int sigMotionSensorId = getContext().getResources().getInteger(
                         com.android.internal.R.integer.config_autoPowerModeAnyMotionSensor);
@@ -1759,6 +1764,12 @@ public class DeviceIdleController extends SystemService
                 }
                 reportTempWhitelistChangedLocked();
             }
+	    //if( mState == STATE_IDLE ) {
+	    //    stepIdleStateLocked("s:activity");
+	    //}
+	    //if( mState == STATE_IDLE_MAINTENANCE ) {
+	    //	cancelAlarmLocked();	
+	    //}
         }
         if (networkPolicyTempWhitelistCallback != null) {
             networkPolicyTempWhitelistCallback.run();
@@ -1787,6 +1798,9 @@ public class DeviceIdleController extends SystemService
         synchronized (this) {
             Pair<MutableLong, String> entry = mTempWhitelistAppIdEndTimes.get(uid);
             if (entry == null) {
+		//if( mTempWhitelistAppIdEndTimes.size() == 0 ) {
+		//	exitMaintenanceEarlyIfNeededLocked();
+		//}
                 // Nothing to do
                 return;
             }
@@ -1805,6 +1819,9 @@ public class DeviceIdleController extends SystemService
                             entry.second, uid);
                 } catch (RemoteException e) {
                 }
+		//if( mTempWhitelistAppIdEndTimes.size() == 0 ) {
+		//	exitMaintenanceEarlyIfNeededLocked();
+		//}
             } else {
                 // Need more time
                 if (DEBUG) {
@@ -2045,7 +2062,7 @@ public class DeviceIdleController extends SystemService
     }
 
     void stepIdleStateLocked(String reason) {
-        if (DEBUG) Slog.d(TAG, "stepIdleStateLocked: mState=" + mState);
+        if (DEBUG) Slog.d(TAG, "stepIdleStateLocked: mState=" + mState + ", reason=" + reason);
         EventLogTags.writeDeviceIdleStep();
 
         final long now = SystemClock.elapsedRealtime();
@@ -2067,6 +2084,11 @@ public class DeviceIdleController extends SystemService
                 // Reset the upcoming idle delays.
                 mNextIdlePendingDelay = mConstants.IDLE_PENDING_TIMEOUT;
                 mNextIdleDelay = mConstants.IDLE_TIMEOUT;
+		// Check if screen off due to proximity sonsor (InCall)
+		if ( mPowerManagerService != null && mPowerManagerService.isProximityScreenOff() ) {
+		    scheduleAlarmLocked(5000, false);
+		    break;
+		}
                 mState = STATE_IDLE_PENDING;
                 if (DEBUG) Slog.d(TAG, "Moved from STATE_INACTIVE to STATE_IDLE_PENDING.");
                 EventLogTags.writeDeviceIdle(mState, reason);
@@ -2171,13 +2193,16 @@ public class DeviceIdleController extends SystemService
     void incActiveIdleOps() {
         synchronized (this) {
             mActiveIdleOpCount++;
+            if (DEBUG) Slog.d(TAG, "incActiveIdleOps = " + mActiveIdleOpCount);
         }
     }
 
     void decActiveIdleOps() {
         synchronized (this) {
             mActiveIdleOpCount--;
+            if (DEBUG) Slog.d(TAG, "decActiveIdleOps = " + mActiveIdleOpCount);
             if (mActiveIdleOpCount <= 0) {
+		mActiveIdleOpCount = 0;
                 exitMaintenanceEarlyIfNeededLocked();
                 mActiveIdleWakeLock.release();
             }
@@ -2187,6 +2212,7 @@ public class DeviceIdleController extends SystemService
     void setJobsActive(boolean active) {
         synchronized (this) {
             mJobsActive = active;
+            if (DEBUG) Slog.d(TAG, "setJobsActive = " + mJobsActive);
             reportMaintenanceActivityIfNeededLocked();
             if (!active) {
                 exitMaintenanceEarlyIfNeededLocked();
@@ -2197,6 +2223,7 @@ public class DeviceIdleController extends SystemService
     void setAlarmsActive(boolean active) {
         synchronized (this) {
             mAlarmsActive = active;
+            if (DEBUG) Slog.d(TAG, "setAlarmsActive = " + mAlarmsActive);
             if (!active) {
                 exitMaintenanceEarlyIfNeededLocked();
             }
@@ -2228,7 +2255,8 @@ public class DeviceIdleController extends SystemService
     }
 
     boolean isOpsInactiveLocked() {
-        return mActiveIdleOpCount <= 0 && !mJobsActive && !mAlarmsActive;
+        if (DEBUG) Slog.d(TAG, "isOpsInactiveLocked (" + mActiveIdleOpCount + "," + mJobsActive + "," + mAlarmsActive + "," + mTempWhitelistAppIdEndTimes.size() + ")");
+        return mActiveIdleOpCount <= 0 && !mJobsActive && !mAlarmsActive && mTempWhitelistAppIdEndTimes.size() == 0;
     }
 
     void exitMaintenanceEarlyIfNeededLocked() {
